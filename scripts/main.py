@@ -45,14 +45,18 @@ def _is_busy() -> bool:
     """生成中かどうかを複数のバックエンド API で確認する。"""
     try:
         from modules import shared
+        state = shared.state
+        # 中断済み・停止済みなら busy とみなさない
+        if getattr(state, 'interrupted', False) or getattr(state, 'stopping_generation', False):
+            return False
         # A1111 / Forge 共通: job_count
-        if hasattr(shared.state, 'job_count') and shared.state.job_count > 0:
+        if hasattr(state, 'job_count') and state.job_count > 0:
             return True
         # Forge Neo / SD.Next: current_latent が存在するとき生成中
-        if hasattr(shared.state, 'current_latent') and shared.state.current_latent is not None:
+        if hasattr(state, 'current_latent') and state.current_latent is not None:
             return True
         # processing フラグ (一部フォーク)
-        if getattr(shared.state, 'processing', False):
+        if getattr(state, 'processing', False):
             return True
     except Exception:
         pass
@@ -79,6 +83,17 @@ def on_app_started(_demo: gr.Blocks, app: FastAPI):
             return {"status": "busy", "error": "WebUI は生成中です。"}
         _pending.put(req.dict())
         return {"status": "queued", "queue_size": _pending.qsize()}
+
+    @app.post("/pb/reset-busy")
+    async def reset_busy():
+        """stuck した busy 状態をリセットする。"""
+        try:
+            from modules import shared
+            shared.state.job_count = 0
+            shared.state.current_latent = None
+        except Exception:
+            pass
+        return {"status": "ok"}
 
     @app.get("/pb/poll")
     async def poll():

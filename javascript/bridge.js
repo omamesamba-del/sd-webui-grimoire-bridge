@@ -39,7 +39,8 @@
     function setTextarea(el, value) {
         const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
         setter.call(el, value);
-        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('input',  { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
     // ── 要素取得ヘルパー（A1111 / Forge / Forge Neo 対応フォールバック） ────
@@ -244,7 +245,7 @@
                     return;
                 }
                 btn.click();
-            }, 150);
+            }, 400);
         }
     }
 

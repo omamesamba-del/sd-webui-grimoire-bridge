@@ -237,14 +237,15 @@
                     console.warn('[PB Bridge] Generate ボタンが見つかりません。');
                     return;
                 }
-                // 生成中（Interrupt ボタン表示中）はスキップ
+                // 生成中（Interrupt ボタン表示中 かつ Generate ボタン非表示）のときのみスキップ
                 const interrupt = getInterruptBtn(root2);
-                const isGenerating = interrupt && interrupt.offsetParent !== null;
-                if (isGenerating) {
+                const interruptVisible = interrupt && interrupt.offsetParent !== null && getComputedStyle(interrupt).display !== 'none';
+                const generateHidden  = btn.offsetParent === null || getComputedStyle(btn).display === 'none' || btn.disabled;
+                if (interruptVisible && generateHidden) {
                     console.warn('[PB Bridge] WebUI は生成中のため Generate をスキップしました。');
                     return;
                 }
-                btn.click();
+                btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
             }, 400);
         }
     }

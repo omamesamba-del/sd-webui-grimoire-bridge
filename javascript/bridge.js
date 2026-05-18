@@ -1,5 +1,5 @@
 /**
- * grimoire Bridge — WebUI Frontend v1.3.3
+ * grimoire Bridge — WebUI Frontend v1.3.4
  * Compatible with: AUTOMATIC1111 WebUI / SD.Next / Forge / Forge Neo
  * Polls /pb/poll for pending prompts and fills txt2img form + clicks Generate.
  * State is pushed on-demand only (when grimoire requests it via /pb/request-state).
@@ -9,7 +9,7 @@
 
     const POLL_INTERVAL_MS = 500;
     const STARTUP_DELAY_MS = 1500;
-    const VERSION = '1.3.3';
+    const VERSION = '1.3.4';
 
     // ── DOM ヘルパー ──────────────────────────────────────────────────────────
 
@@ -206,9 +206,64 @@
     }
 
     /**
-     * /sdapi/v1/options 経由で Quick Setting を変更し、GETで変更を確認する。
-     * Gradio UI は API 変更を自動反映しないため、確認後に入力欄も直接書き換える。
+     * モデル名のバリアント（basename、拡張子なし）で /sdapi/v1/sd-models を検索し、
+     * WebUI が期待するフルタイトル（サブフォルダ付き）を返す。見つからなければ元の値を返す。
      */
+    async function resolveModelTitle(value) {
+        try {
+            const res = await fetch('/sdapi/v1/sd-models');
+            if (!res.ok) return value;
+            const models = await res.json();
+            // 完全一致（title）
+            const exact = models.find(m => m.title === value || m.model_name === value);
+            if (exact) return exact.title;
+            // basename（拡張子なし）での曖昧一致
+            const needle = value.replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '').toLowerCase();
+            const fuzzy = models.find(m => {
+                const hay = (m.title || '').replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '').toLowerCase();
+                return hay === needle;
+            });
+            if (fuzzy) {
+                console.log(`[grimoire Bridge] resolved checkpoint: "${value}" → "${fuzzy.title}"`);
+                return fuzzy.title;
+            }
+        } catch (_) {}
+        return value;
+    }
+
+    /**
+     * /sdapi/v1/options 経由で Quick Setting を変更する。
+     * checkpoint は /sdapi/v1/sd-models でフルタイトルを解決してから POST する。
+     */
+    async function setCheckpointViaApi(value, domId) {
+        if (value == null) return;
+        const title = await resolveModelTitle(value);
+        const res = await fetch('/sdapi/v1/options', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sd_model_checkpoint: title }),
+        }).catch(e => { console.warn('[grimoire Bridge] setCheckpointViaApi failed:', e); return null; });
+        if (!res?.ok) { console.warn(`[grimoire Bridge] setCheckpointViaApi HTTP ${res?.status}`); return; }
+
+        // GET で実際の値を確認して Gradio 入力欄を更新
+        const verify = await fetch('/sdapi/v1/options').catch(() => null);
+        if (verify?.ok) {
+            const opts = await verify.json();
+            const actual = opts.sd_model_checkpoint;
+            console.log(`[grimoire Bridge] checkpoint: requested="${title}" actual="${actual}"`);
+            if (domId) {
+                const root = gradioApp();
+                const el = root.querySelector(`#${domId}`);
+                const inp = el?.querySelector('input[type="text"]') || el?.querySelector('input');
+                if (inp) {
+                    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+                    nativeSetter.call(inp, actual || title);
+                    inp.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+            }
+        }
+    }
+
     function setOptionViaApi(key, value, domId) {
         if (value == null) return;
         fetch('/sdapi/v1/options', {
@@ -216,31 +271,19 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ [key]: value }),
         }).then(async (res) => {
-            if (!res.ok) {
-                console.warn(`[grimoire Bridge] setOptionViaApi POST failed: HTTP ${res.status}`);
-                return;
-            }
-            // POST 後に GET で実際の値を確認
-            const verifyRes = await fetch('/sdapi/v1/options');
-            if (verifyRes.ok) {
-                const opts = await verifyRes.json();
-                const actual = opts[key];
-                console.log(`[grimoire Bridge] ${key}: requested="${value}" actual="${actual}"`);
-                // Gradio UI のドロップダウン入力欄を視覚的に更新
-                if (domId) {
-                    const root = gradioApp();
-                    const el = root.querySelector(`#${domId}`);
-                    const inp = el?.querySelector('input[type="text"]') || el?.querySelector('input');
-                    if (inp) {
-                        const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-                        nativeSetter.call(inp, actual || value);
-                        inp.dispatchEvent(new Event('input', { bubbles: true }));
-                    }
+            if (!res.ok) { console.warn(`[grimoire Bridge] setOptionViaApi(${key}) HTTP ${res.status}`); return; }
+            console.log(`[grimoire Bridge] set ${key} = "${value}"`);
+            if (domId) {
+                const root = gradioApp();
+                const el = root.querySelector(`#${domId}`);
+                const inp = el?.querySelector('input[type="text"]') || el?.querySelector('input');
+                if (inp) {
+                    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+                    nativeSetter.call(inp, value);
+                    inp.dispatchEvent(new Event('input', { bubbles: true }));
                 }
             }
-        }).catch(e => {
-            console.warn(`[grimoire Bridge] setOptionViaApi(${key}) failed:`, e);
-        });
+        }).catch(e => { console.warn(`[grimoire Bridge] setOptionViaApi(${key}) failed:`, e); });
     }
 
     /** gen オブジェクトの各フィールドを WebUI フォームに適用する */
@@ -261,8 +304,9 @@
         setDropdown(root, gen.hiresUpscaler, 'txt2img_hr_upscaler', 'txt2img_hr_upscaler_name');
         setCheckbox(root, gen.hiresFix,      'txt2img_enable_hr', 'txt2img_hr_enable');
         // checkpoint / vae は Gradio 4 DOM では変更不可のため API 経由で変更
-        setOptionViaApi('sd_model_checkpoint', gen.checkpoint, 'setting_sd_model_checkpoint');
-        setOptionViaApi('sd_vae',              gen.vae,        'setting_sd_vae');
+        // checkpoint はサブフォルダ付きのフルタイトルを解決してから POST
+        if (gen.checkpoint) setCheckpointViaApi(gen.checkpoint, 'setting_sd_model_checkpoint');
+        setOptionViaApi('sd_vae', gen.vae, 'setting_sd_vae');
         if (gen.clipSkip != null && !isNaN(gen.clipSkip)) {
             setNum(root, 'setting_CLIP_stop_at_last_layers', gen.clipSkip);
         }

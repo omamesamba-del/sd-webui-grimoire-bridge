@@ -1,5 +1,5 @@
 /**
- * grimoire Bridge — WebUI Frontend v1.3.1
+ * grimoire Bridge — WebUI Frontend v1.3.2
  * Compatible with: AUTOMATIC1111 WebUI / SD.Next / Forge / Forge Neo
  * Polls /pb/poll for pending prompts and fills txt2img form + clicks Generate.
  * State is pushed on-demand only (when grimoire requests it via /pb/request-state).
@@ -9,7 +9,7 @@
 
     const POLL_INTERVAL_MS = 500;
     const STARTUP_DELAY_MS = 1500;
-    const VERSION = '1.3.1';
+    const VERSION = '1.3.2';
 
     // ── DOM ヘルパー ──────────────────────────────────────────────────────────
 
@@ -205,6 +205,23 @@
         }
     }
 
+    /**
+     * /sdapi/v1/options 経由で Quick Setting を変更する。
+     * Gradio 4 のカスタムドロップダウンは DOM イベントでは反応しないため API を使う。
+     */
+    function setOptionViaApi(key, value) {
+        if (value == null) return;
+        fetch('/sdapi/v1/options', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [key]: value }),
+        }).then(() => {
+            console.log(`[grimoire Bridge] set ${key} = "${value}"`);
+        }).catch(e => {
+            console.warn(`[grimoire Bridge] setOptionViaApi(${key}) failed:`, e);
+        });
+    }
+
     /** gen オブジェクトの各フィールドを WebUI フォームに適用する */
     function applyGen(root, gen) {
         if (!gen) return;
@@ -222,9 +239,9 @@
         setDropdown(root, gen.schedule,      'txt2img_scheduler', 'txt2img_scheduler_type');
         setDropdown(root, gen.hiresUpscaler, 'txt2img_hr_upscaler', 'txt2img_hr_upscaler_name');
         setCheckbox(root, gen.hiresFix,      'txt2img_enable_hr', 'txt2img_hr_enable');
-        // Quick settings（shadow DOM 内にあるため gradioApp() で探す）
-        setDropdown(root, gen.checkpoint, 'setting_sd_model_checkpoint');
-        setDropdown(root, gen.vae,        'setting_sd_vae');
+        // checkpoint / vae は Gradio 4 DOM では変更不可のため API 経由で変更
+        setOptionViaApi('sd_model_checkpoint', gen.checkpoint);
+        setOptionViaApi('sd_vae',              gen.vae);
         if (gen.clipSkip != null && !isNaN(gen.clipSkip)) {
             setNum(root, 'setting_CLIP_stop_at_last_layers', gen.clipSkip);
         }

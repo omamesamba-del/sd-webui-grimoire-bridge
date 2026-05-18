@@ -1,5 +1,5 @@
 /**
- * grimoire Bridge — WebUI Frontend v1.3.0
+ * grimoire Bridge — WebUI Frontend v1.3.1
  * Compatible with: AUTOMATIC1111 WebUI / SD.Next / Forge / Forge Neo
  * Polls /pb/poll for pending prompts and fills txt2img form + clicks Generate.
  * State is pushed on-demand only (when grimoire requests it via /pb/request-state).
@@ -9,7 +9,7 @@
 
     const POLL_INTERVAL_MS = 500;
     const STARTUP_DELAY_MS = 1500;
-    const VERSION = '1.3.0';
+    const VERSION = '1.3.1';
 
     // ── DOM ヘルパー ──────────────────────────────────────────────────────────
 
@@ -141,7 +141,7 @@
         inp.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
-    /** Gradio のドロップダウンに値をセットする（select / カスタム input 両対応） */
+    /** Gradio のドロップダウンに値をセットする（select / カスタム input / Gradio 4 クリック対応） */
     function setDropdown(root, value, ...ids) {
         if (value == null) return;
         for (const id of ids) {
@@ -158,10 +158,33 @@
             // パターン②: Gradio 4 カスタムドロップダウン (input[type="text"])
             const inp = el.querySelector('input[type="text"]');
             if (inp) {
-                const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-                nativeSetter.call(inp, value);
-                inp.dispatchEvent(new Event('input',  { bubbles: true }));
-                inp.dispatchEvent(new Event('change', { bubbles: true }));
+                // フォーカス＆クリックでドロップダウンを開く
+                inp.focus();
+                inp.click();
+                // オプションリストが表示されるまで待ってからクリック選択
+                const tryClick = (attemptsLeft) => {
+                    // コンテナ内を探し、なければ document 全体を探す（portal 対応）
+                    let items = Array.from(el.querySelectorAll('ul.options li, .options li, li.item'));
+                    if (items.length === 0) {
+                        items = Array.from(document.querySelectorAll('ul.options li, .options li, li.item'));
+                    }
+                    const exact = items.find(it => it.textContent.trim() === value);
+                    if (exact) { exact.click(); return; }
+                    const partial = items.find(it => it.textContent.trim().includes(value) || value.includes(it.textContent.trim()));
+                    if (partial) { partial.click(); return; }
+                    if (attemptsLeft > 0) {
+                        setTimeout(() => tryClick(attemptsLeft - 1), 60);
+                    } else {
+                        // フォールバック: イベント発火のみ（視覚的には変わらないが記録は残る）
+                        const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+                        nativeSetter.call(inp, value);
+                        inp.dispatchEvent(new Event('input',  { bubbles: true }));
+                        inp.dispatchEvent(new Event('change', { bubbles: true }));
+                        inp.blur();
+                        console.warn(`[grimoire Bridge] dropdown option not found: "${value}" in #${id}`);
+                    }
+                };
+                setTimeout(() => tryClick(10), 60);
                 return;
             }
         }

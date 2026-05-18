@@ -1,5 +1,5 @@
 """
-grimoire Bridge — WebUI Extension v1.3.0
+grimoire Bridge — WebUI Extension v1.3.5
 Compatible with: AUTOMATIC1111 WebUI / SD.Next / Forge / Forge Neo
 Receives prompt from grimoire app and fills txt2img form + clicks Generate.
 """
@@ -15,7 +15,7 @@ try:
 except Exception:
     _HAS_SCRIPTS = False
 
-_BRIDGE_VERSION = "1.3.0"
+_BRIDGE_VERSION = "1.3.5"
 _pending: queue.Queue = queue.Queue()
 _last_state: dict = {}          # bridge.js から push される最新の WebUI 状態
 _state_requested: bool = False  # grimoire からのオンデマンド取得フラグ

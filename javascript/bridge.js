@@ -199,6 +199,13 @@
         setDropdown(root, gen.schedule,      'txt2img_scheduler', 'txt2img_scheduler_type');
         setDropdown(root, gen.hiresUpscaler, 'txt2img_hr_upscaler', 'txt2img_hr_upscaler_name');
         setCheckbox(root, gen.hiresFix,      'txt2img_enable_hr', 'txt2img_hr_enable');
+        // Quick settings（ページ上部のグローバル設定）
+        const qsRoot = document.body;
+        setDropdown(qsRoot, gen.checkpoint, 'setting_sd_model_checkpoint');
+        setDropdown(qsRoot, gen.vae,        'setting_sd_vae');
+        if (gen.clipSkip != null && !isNaN(gen.clipSkip)) {
+            setNum(qsRoot, 'setting_CLIP_stop_at_last_layers', gen.clipSkip);
+        }
     }
 
     // ── プロンプト適用 ────────────────────────────────────────────────────────

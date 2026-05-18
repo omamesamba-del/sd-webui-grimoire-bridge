@@ -1,5 +1,5 @@
 /**
- * grimoire Bridge — WebUI Frontend v1.3.4
+ * grimoire Bridge — WebUI Frontend v1.3.5
  * Compatible with: AUTOMATIC1111 WebUI / SD.Next / Forge / Forge Neo
  * Polls /pb/poll for pending prompts and fills txt2img form + clicks Generate.
  * State is pushed on-demand only (when grimoire requests it via /pb/request-state).
@@ -9,7 +9,7 @@
 
     const POLL_INTERVAL_MS = 500;
     const STARTUP_DELAY_MS = 1500;
-    const VERSION = '1.3.4';
+    const VERSION = '1.3.5';
 
     // ── DOM ヘルパー ──────────────────────────────────────────────────────────
 
@@ -231,12 +231,20 @@
         return value;
     }
 
+    // 前回送信したチェックポイント（raw値）のキャッシュ。同一値なら送信をスキップする。
+    let _lastSentCheckpoint = null;
+
     /**
      * /sdapi/v1/options 経由で Quick Setting を変更する。
      * checkpoint は /sdapi/v1/sd-models でフルタイトルを解決してから POST する。
+     * 前回と同じ値なら送信をスキップする。
      */
     async function setCheckpointViaApi(value, domId) {
         if (value == null) return;
+        if (value === _lastSentCheckpoint) {
+            console.log(`[grimoire Bridge] checkpoint unchanged, skipping`);
+            return;
+        }
         const title = await resolveModelTitle(value);
         const res = await fetch('/sdapi/v1/options', {
             method: 'POST',
@@ -244,6 +252,7 @@
             body: JSON.stringify({ sd_model_checkpoint: title }),
         }).catch(e => { console.warn('[grimoire Bridge] setCheckpointViaApi failed:', e); return null; });
         if (!res?.ok) { console.warn(`[grimoire Bridge] setCheckpointViaApi HTTP ${res?.status}`); return; }
+        _lastSentCheckpoint = value; // 送信成功→キャッシュ更新
 
         // GET で実際の値を確認して Gradio 入力欄を更新
         const verify = await fetch('/sdapi/v1/options').catch(() => null);

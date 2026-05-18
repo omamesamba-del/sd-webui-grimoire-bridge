@@ -1,5 +1,5 @@
 /**
- * grimoire Bridge — WebUI Frontend v1.3.2
+ * grimoire Bridge — WebUI Frontend v1.3.3
  * Compatible with: AUTOMATIC1111 WebUI / SD.Next / Forge / Forge Neo
  * Polls /pb/poll for pending prompts and fills txt2img form + clicks Generate.
  * State is pushed on-demand only (when grimoire requests it via /pb/request-state).
@@ -9,7 +9,7 @@
 
     const POLL_INTERVAL_MS = 500;
     const STARTUP_DELAY_MS = 1500;
-    const VERSION = '1.3.2';
+    const VERSION = '1.3.3';
 
     // ── DOM ヘルパー ──────────────────────────────────────────────────────────
 
@@ -206,17 +206,38 @@
     }
 
     /**
-     * /sdapi/v1/options 経由で Quick Setting を変更する。
-     * Gradio 4 のカスタムドロップダウンは DOM イベントでは反応しないため API を使う。
+     * /sdapi/v1/options 経由で Quick Setting を変更し、GETで変更を確認する。
+     * Gradio UI は API 変更を自動反映しないため、確認後に入力欄も直接書き換える。
      */
-    function setOptionViaApi(key, value) {
+    function setOptionViaApi(key, value, domId) {
         if (value == null) return;
         fetch('/sdapi/v1/options', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ [key]: value }),
-        }).then(() => {
-            console.log(`[grimoire Bridge] set ${key} = "${value}"`);
+        }).then(async (res) => {
+            if (!res.ok) {
+                console.warn(`[grimoire Bridge] setOptionViaApi POST failed: HTTP ${res.status}`);
+                return;
+            }
+            // POST 後に GET で実際の値を確認
+            const verifyRes = await fetch('/sdapi/v1/options');
+            if (verifyRes.ok) {
+                const opts = await verifyRes.json();
+                const actual = opts[key];
+                console.log(`[grimoire Bridge] ${key}: requested="${value}" actual="${actual}"`);
+                // Gradio UI のドロップダウン入力欄を視覚的に更新
+                if (domId) {
+                    const root = gradioApp();
+                    const el = root.querySelector(`#${domId}`);
+                    const inp = el?.querySelector('input[type="text"]') || el?.querySelector('input');
+                    if (inp) {
+                        const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+                        nativeSetter.call(inp, actual || value);
+                        inp.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                }
+            }
         }).catch(e => {
             console.warn(`[grimoire Bridge] setOptionViaApi(${key}) failed:`, e);
         });
@@ -240,8 +261,8 @@
         setDropdown(root, gen.hiresUpscaler, 'txt2img_hr_upscaler', 'txt2img_hr_upscaler_name');
         setCheckbox(root, gen.hiresFix,      'txt2img_enable_hr', 'txt2img_hr_enable');
         // checkpoint / vae は Gradio 4 DOM では変更不可のため API 経由で変更
-        setOptionViaApi('sd_model_checkpoint', gen.checkpoint);
-        setOptionViaApi('sd_vae',              gen.vae);
+        setOptionViaApi('sd_model_checkpoint', gen.checkpoint, 'setting_sd_model_checkpoint');
+        setOptionViaApi('sd_vae',              gen.vae,        'setting_sd_vae');
         if (gen.clipSkip != null && !isNaN(gen.clipSkip)) {
             setNum(root, 'setting_CLIP_stop_at_last_layers', gen.clipSkip);
         }

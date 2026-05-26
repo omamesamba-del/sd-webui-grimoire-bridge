@@ -142,55 +142,62 @@ def on_app_started(_demo: gr.Blocks, app: FastAPI):
 script_callbacks.on_app_started(on_app_started)
 
 
+# ── sampler/scheduler トリガー (script_callbacks 経由) ──────────────────────
+# AlwaysVisible Script は Forge/reForge の生成パイプラインに干渉するため使わない。
+# script_callbacks.on_after_component で UI ビルド時にトリガー Textbox を仕込む。
+
+_tracked_comps: dict = {}   # elem_id -> component
+
+
+def _create_triggers(prefix: str) -> None:
+    sampler_comp   = _tracked_comps.get(f'{prefix}_sampling')
+    scheduler_comp = _tracked_comps.get(f'{prefix}_scheduler')
+
+    fn = lambda v: gr.update(value=v) if v else gr.update()
+    try:
+        with gr.Row(visible=False):
+            t_s = gr.Textbox(value='', label='',
+                             elem_id=f'grimoire_{prefix}_sampler_trigger',
+                             interactive=True)
+            t_c = gr.Textbox(value='', label='',
+                             elem_id=f'grimoire_{prefix}_scheduler_trigger',
+                             interactive=True)
+        if sampler_comp is not None:
+            t_s.input(fn=fn, inputs=[t_s], outputs=[sampler_comp], show_progress=False)
+        if scheduler_comp is not None:
+            t_c.input(fn=fn, inputs=[t_c], outputs=[scheduler_comp], show_progress=False)
+        print(f'[grimoire Bridge] triggers registered for {prefix}')
+    except Exception as e:
+        print(f'[grimoire Bridge] _create_triggers({prefix}) failed: {e}')
+
+
+def _on_after_component(component, **kwargs) -> None:
+    eid = getattr(component, 'elem_id', '')
+    if eid in ('txt2img_sampling', 'txt2img_scheduler',
+               'img2img_sampling', 'img2img_scheduler'):
+        _tracked_comps[eid] = component
+    if eid == 'txt2img_generation_info_button':
+        _create_triggers('txt2img')
+    elif eid == 'img2img_generation_info_button':
+        _create_triggers('img2img')
+
+
+try:
+    from modules import script_callbacks as _sc
+    _sc.on_after_component(_on_after_component)
+except Exception as e:
+    print(f'[grimoire Bridge] on_after_component not available: {e}')
+
+
 # scripts/ フォルダに置く場合は Script サブクラスが必要。
-# AlwaysVisible にすることで after_component() が呼ばれ、sampler/scheduler
-# コンポーネントを Python 経由で更新するためのトリガー Textbox を仕込む。
+# show() = False で生成パイプラインに一切関与しない。
 if _HAS_SCRIPTS:
     class GrimoireBridgeScript(scripts.Script):
-        def __init__(self):
-            self._sampler  = {}   # prefix -> gr.Radio / gr.Dropdown
-            self._scheduler = {}  # prefix -> gr.Dropdown
-
         def title(self):
             return "grimoire Bridge"
 
         def show(self, is_img2img):
-            return scripts.AlwaysVisible
+            return False
 
         def ui(self, is_img2img):
             return []
-
-        def after_component(self, component, **kwargs):
-            eid = getattr(component, 'elem_id', '')
-            for prefix in ('txt2img', 'img2img'):
-                if eid == f'{prefix}_sampling':
-                    self._sampler[prefix] = component
-                elif eid == f'{prefix}_scheduler':
-                    self._scheduler[prefix] = component
-
-            if eid == 'txt2img_generation_info_button':
-                self._create_triggers('txt2img')
-            elif eid == 'img2img_generation_info_button':
-                self._create_triggers('img2img')
-
-        def _create_triggers(self, prefix):
-            sampler_comp   = self._sampler.get(prefix)
-            scheduler_comp = self._scheduler.get(prefix)
-
-            fn = lambda v: gr.update(value=v) if v else gr.update()
-
-            with gr.Row(visible=False):
-                t_s = gr.Textbox(value='', label='',
-                                 elem_id=f'grimoire_{prefix}_sampler_trigger',
-                                 interactive=True)
-                t_c = gr.Textbox(value='', label='',
-                                 elem_id=f'grimoire_{prefix}_scheduler_trigger',
-                                 interactive=True)
-
-            if sampler_comp is not None:
-                t_s.input(fn=fn, inputs=[t_s], outputs=[sampler_comp], show_progress=False)
-            if scheduler_comp is not None:
-                t_c.input(fn=fn, inputs=[t_c], outputs=[scheduler_comp], show_progress=False)
-
-        def run(self, p, *args):
-            pass

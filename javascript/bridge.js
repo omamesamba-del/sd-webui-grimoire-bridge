@@ -9,7 +9,7 @@
 
     const POLL_INTERVAL_MS = 500;
     const STARTUP_DELAY_MS = 1500;
-    const VERSION = '1.3.8';
+    const VERSION = '1.3.9';
 
     // ── DOM ヘルパー ──────────────────────────────────────────────────────────
 
@@ -141,7 +141,8 @@
         inp.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
-    /** Gradio のドロップダウンに値をセットする（select / カスタム input / Gradio 4 クリック対応）
+    /** Gradio のドロップダウン / ラジオに値をセットする
+     *  gr.Radio (input[type="radio"]) / gr.Dropdown (input[type="text"]) / native select に対応。
      *  Promise を返す。操作完了（成功 or フォールバック）後に resolve する。
      */
     function setDropdown(root, value, ...ids) {
@@ -149,74 +150,109 @@
         for (const id of ids) {
             const el = root.querySelector(`#${id}`);
             if (!el) continue;
+
             // パターン①: native select
             const sel = el.querySelector('select');
             if (sel) {
                 const nativeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
                 nativeSetter.call(sel, value);
                 sel.dispatchEvent(new Event('change', { bubbles: true }));
+                console.log(`[grimoire Bridge] native select: set #${id} = "${value}"`);
                 return Promise.resolve();
             }
-            // パターン②: Gradio 4 カスタムドロップダウン (input[type="text"])
+
+            // パターン②: gr.Radio (input[type="radio"]) — reForge デフォルトのサンプラー
+            const radios = Array.from(el.querySelectorAll('input[type="radio"]'));
+            if (radios.length > 0) {
+                // value 属性で一致 → ラベルテキストで一致 の順で探す
+                const target = radios.find(r => r.value === value)
+                    || radios.find(r => r.closest('label')?.textContent?.trim() === value)
+                    || radios.find(r => r.closest('label')?.textContent?.trim().includes(value));
+                if (target) {
+                    target.click();
+                    target.dispatchEvent(new Event('change', { bubbles: true }));
+                    console.log(`[grimoire Bridge] radio: set #${id} = "${value}"`);
+                    return Promise.resolve();
+                }
+                // ボタン式ラジオ（Gradio 4 の一部バリアント）
+                const btns = Array.from(el.querySelectorAll('button, [role="radio"]'));
+                const btn  = btns.find(b => b.textContent.trim() === value)
+                    || btns.find(b => b.textContent.trim().includes(value));
+                if (btn) {
+                    btn.click();
+                    console.log(`[grimoire Bridge] radio button: set #${id} = "${value}"`);
+                    return Promise.resolve();
+                }
+                console.warn(`[grimoire Bridge] radio option not found: "${value}" in #${id}`);
+                return Promise.resolve();
+            }
+
+            // パターン③: Gradio 4 カスタムドロップダウン (input[type="text"])
             const inp = el.querySelector('input[type="text"]');
             if (inp) {
                 return new Promise((resolve) => {
-                    // ドロップダウンを開く: 親コンテナと input の両方に mousedown+click を送る
-                    const container = inp.closest('.wrap, .wrap-inner, [data-testid]') || inp.parentElement;
+                    // ドロップダウンを開く: コンテナ → input の順に pointer/mouse/click を送る
+                    const container = el.querySelector('.wrap') || el.querySelector('.wrap-inner') || inp.parentElement;
+                    const openEvents = [
+                        new PointerEvent('pointerdown', { bubbles: true, cancelable: true }),
+                        new MouseEvent('mousedown',     { bubbles: true, cancelable: true }),
+                    ];
                     if (container && container !== inp) {
-                        container.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                        openEvents.forEach(e => container.dispatchEvent(e));
+                        container.click();
                     }
                     inp.focus();
-                    inp.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                    openEvents.forEach(e => inp.dispatchEvent(e));
                     inp.click();
 
+                    const OPTION_SELECTORS = [
+                        'ul.options li', '.options li', 'li.item',
+                        '[role="option"]', 'li[role="option"]',
+                        'ul[role="listbox"] li', '[role="listbox"] [role="option"]',
+                        'div.options > div', '.dropdown-wrapper li',
+                        'ul li',
+                    ];
                     const findItems = () => {
-                        // Gradio バージョン / フォークによってリスト構造が異なるため複数セレクタを試す
-                        const OPTION_SELECTORS = [
-                            'ul.options li', '.options li', 'li.item',
-                            '[role="option"]', 'li[role="option"]',
-                            'ul[role="listbox"] li', '[role="listbox"] [role="option"]',
-                            'div.options > div', '.dropdown-wrapper li',
-                            'ul li',
-                        ];
-                        for (const sel of OPTION_SELECTORS) {
-                            const found = Array.from(el.querySelectorAll(sel));
+                        for (const s of OPTION_SELECTORS) {
+                            const found = Array.from(el.querySelectorAll(s));
                             if (found.length > 0) return found;
                         }
-                        for (const sel of OPTION_SELECTORS.slice(0, -1)) {
-                            const found = Array.from(document.querySelectorAll(sel));
+                        // ドロップダウンリストが el の外側にレンダリングされる場合
+                        for (const s of OPTION_SELECTORS.slice(0, -1)) {
+                            const found = Array.from(document.querySelectorAll(s));
                             if (found.length > 0) return found;
                         }
                         return [];
                     };
 
                     const selectItem = (item) => {
-                        // mousedown を先に送ることで input の blur によるドロップダウン消失を防ぐ
-                        item.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-                        item.dispatchEvent(new MouseEvent('mouseup',   { bubbles: true, cancelable: true }));
+                        item.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+                        item.dispatchEvent(new MouseEvent('mousedown',     { bubbles: true, cancelable: true }));
+                        item.dispatchEvent(new MouseEvent('mouseup',       { bubbles: true, cancelable: true }));
                         item.click();
                     };
 
                     const tryClick = (attemptsLeft) => {
                         const items = findItems();
+                        console.log(`[grimoire Bridge] dropdown #${id}: attempt ${16 - attemptsLeft}, items=${items.length}`);
                         const exact   = items.find(it => it.textContent.trim() === value);
-                        if (exact)   { selectItem(exact);   resolve(); return; }
+                        if (exact)   { selectItem(exact);   console.log(`[grimoire Bridge] dropdown: set #${id} = "${value}" (exact)`);   resolve(); return; }
                         const partial = items.find(it => it.textContent.trim().includes(value) || value.includes(it.textContent.trim()));
-                        if (partial) { selectItem(partial); resolve(); return; }
+                        if (partial) { selectItem(partial); console.log(`[grimoire Bridge] dropdown: set #${id} = "${value}" (partial)`); resolve(); return; }
                         if (attemptsLeft > 0) {
                             setTimeout(() => tryClick(attemptsLeft - 1), 80);
                         } else {
-                            // フォールバック: input value を直接書き換えてイベント発火
+                            // フォールバック
                             const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
                             nativeSetter.call(inp, value);
                             inp.dispatchEvent(new Event('input',  { bubbles: true }));
                             inp.dispatchEvent(new Event('change', { bubbles: true }));
                             inp.blur();
-                            console.warn(`[grimoire Bridge] dropdown option not found: "${value}" in #${id}`);
+                            console.warn(`[grimoire Bridge] dropdown fallback: "${value}" not found in #${id}`);
                             resolve();
                         }
                     };
-                    setTimeout(() => tryClick(15), 100);
+                    setTimeout(() => tryClick(15), 150);
                 });
             }
         }

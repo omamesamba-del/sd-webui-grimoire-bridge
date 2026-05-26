@@ -9,7 +9,7 @@
 
     const POLL_INTERVAL_MS = 500;
     const STARTUP_DELAY_MS = 1500;
-    const VERSION = '1.3.5';
+    const VERSION = '1.3.6';
 
     // ── DOM ヘルパー ──────────────────────────────────────────────────────────
 
@@ -163,10 +163,31 @@
                 inp.click();
                 // オプションリストが表示されるまで待ってからクリック選択
                 const tryClick = (attemptsLeft) => {
-                    // コンテナ内を探し、なければ document 全体を探す（portal 対応）
-                    let items = Array.from(el.querySelectorAll('ul.options li, .options li, li.item'));
+                    // Gradio バージョン / フォークによってリスト構造が異なるため複数セレクタを試す
+                    const OPTION_SELECTORS = [
+                        'ul.options li',
+                        '.options li',
+                        'li.item',
+                        '[role="option"]',
+                        'li[role="option"]',
+                        'ul[role="listbox"] li',
+                        '[role="listbox"] [role="option"]',
+                        'div.options > div',
+                        '.dropdown-wrapper li',
+                        'ul li',  // 最終フォールバック（要素内のみ）
+                    ];
+                    let items = [];
+                    // まずコンテナ内を探す
+                    for (const sel of OPTION_SELECTORS) {
+                        const found = Array.from(el.querySelectorAll(sel));
+                        if (found.length > 0) { items = found; break; }
+                    }
+                    // なければ document 全体を探す（portal 対応）—"ul li" は除く
                     if (items.length === 0) {
-                        items = Array.from(document.querySelectorAll('ul.options li, .options li, li.item'));
+                        for (const sel of OPTION_SELECTORS.slice(0, -1)) {
+                            const found = Array.from(document.querySelectorAll(sel));
+                            if (found.length > 0) { items = found; break; }
+                        }
                     }
                     const exact = items.find(it => it.textContent.trim() === value);
                     if (exact) { exact.click(); return; }
@@ -175,7 +196,7 @@
                     if (attemptsLeft > 0) {
                         setTimeout(() => tryClick(attemptsLeft - 1), 60);
                     } else {
-                        // フォールバック: イベント発火のみ（視覚的には変わらないが記録は残る）
+                        // フォールバック: input value を直接書き換えてイベント発火
                         const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
                         nativeSetter.call(inp, value);
                         inp.dispatchEvent(new Event('input',  { bubbles: true }));

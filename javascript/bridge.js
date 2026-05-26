@@ -9,7 +9,7 @@
 
     const POLL_INTERVAL_MS = 500;
     const STARTUP_DELAY_MS = 1500;
-    const VERSION = '1.3.7';
+    const VERSION = '1.3.8';
 
     // ── DOM ヘルパー ──────────────────────────────────────────────────────────
 
@@ -141,9 +141,11 @@
         inp.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
-    /** Gradio のドロップダウンに値をセットする（select / カスタム input / Gradio 4 クリック対応） */
+    /** Gradio のドロップダウンに値をセットする（select / カスタム input / Gradio 4 クリック対応）
+     *  Promise を返す。操作完了（成功 or フォールバック）後に resolve する。
+     */
     function setDropdown(root, value, ...ids) {
-        if (value == null) return;
+        if (value == null) return Promise.resolve();
         for (const id of ids) {
             const el = root.querySelector(`#${id}`);
             if (!el) continue;
@@ -153,69 +155,72 @@
                 const nativeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
                 nativeSetter.call(sel, value);
                 sel.dispatchEvent(new Event('change', { bubbles: true }));
-                return;
+                return Promise.resolve();
             }
             // パターン②: Gradio 4 カスタムドロップダウン (input[type="text"])
             const inp = el.querySelector('input[type="text"]');
             if (inp) {
-                // ドロップダウンを開く: 親コンテナと input の両方に mousedown+click を送る
-                const container = inp.closest('.wrap, .wrap-inner, [data-testid]') || inp.parentElement;
-                if (container && container !== inp) {
-                    container.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-                }
-                inp.focus();
-                inp.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-                inp.click();
-
-                const findItems = () => {
-                    // Gradio バージョン / フォークによってリスト構造が異なるため複数セレクタを試す
-                    const OPTION_SELECTORS = [
-                        'ul.options li', '.options li', 'li.item',
-                        '[role="option"]', 'li[role="option"]',
-                        'ul[role="listbox"] li', '[role="listbox"] [role="option"]',
-                        'div.options > div', '.dropdown-wrapper li',
-                        'ul li',
-                    ];
-                    for (const sel of OPTION_SELECTORS) {
-                        const found = Array.from(el.querySelectorAll(sel));
-                        if (found.length > 0) return found;
+                return new Promise((resolve) => {
+                    // ドロップダウンを開く: 親コンテナと input の両方に mousedown+click を送る
+                    const container = inp.closest('.wrap, .wrap-inner, [data-testid]') || inp.parentElement;
+                    if (container && container !== inp) {
+                        container.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
                     }
-                    for (const sel of OPTION_SELECTORS.slice(0, -1)) {
-                        const found = Array.from(document.querySelectorAll(sel));
-                        if (found.length > 0) return found;
-                    }
-                    return [];
-                };
+                    inp.focus();
+                    inp.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                    inp.click();
 
-                const selectItem = (item) => {
-                    // mousedown を先に送ることで input の blur によるドロップダウン消失を防ぐ
-                    item.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-                    item.dispatchEvent(new MouseEvent('mouseup',   { bubbles: true, cancelable: true }));
-                    item.click();
-                };
+                    const findItems = () => {
+                        // Gradio バージョン / フォークによってリスト構造が異なるため複数セレクタを試す
+                        const OPTION_SELECTORS = [
+                            'ul.options li', '.options li', 'li.item',
+                            '[role="option"]', 'li[role="option"]',
+                            'ul[role="listbox"] li', '[role="listbox"] [role="option"]',
+                            'div.options > div', '.dropdown-wrapper li',
+                            'ul li',
+                        ];
+                        for (const sel of OPTION_SELECTORS) {
+                            const found = Array.from(el.querySelectorAll(sel));
+                            if (found.length > 0) return found;
+                        }
+                        for (const sel of OPTION_SELECTORS.slice(0, -1)) {
+                            const found = Array.from(document.querySelectorAll(sel));
+                            if (found.length > 0) return found;
+                        }
+                        return [];
+                    };
 
-                const tryClick = (attemptsLeft) => {
-                    const items = findItems();
-                    const exact   = items.find(it => it.textContent.trim() === value);
-                    if (exact)   { selectItem(exact);   return; }
-                    const partial = items.find(it => it.textContent.trim().includes(value) || value.includes(it.textContent.trim()));
-                    if (partial) { selectItem(partial); return; }
-                    if (attemptsLeft > 0) {
-                        setTimeout(() => tryClick(attemptsLeft - 1), 80);
-                    } else {
-                        // フォールバック: input value を直接書き換えてイベント発火
-                        const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-                        nativeSetter.call(inp, value);
-                        inp.dispatchEvent(new Event('input',  { bubbles: true }));
-                        inp.dispatchEvent(new Event('change', { bubbles: true }));
-                        inp.blur();
-                        console.warn(`[grimoire Bridge] dropdown option not found: "${value}" in #${id}`);
-                    }
-                };
-                setTimeout(() => tryClick(15), 100);
-                return;
+                    const selectItem = (item) => {
+                        // mousedown を先に送ることで input の blur によるドロップダウン消失を防ぐ
+                        item.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                        item.dispatchEvent(new MouseEvent('mouseup',   { bubbles: true, cancelable: true }));
+                        item.click();
+                    };
+
+                    const tryClick = (attemptsLeft) => {
+                        const items = findItems();
+                        const exact   = items.find(it => it.textContent.trim() === value);
+                        if (exact)   { selectItem(exact);   resolve(); return; }
+                        const partial = items.find(it => it.textContent.trim().includes(value) || value.includes(it.textContent.trim()));
+                        if (partial) { selectItem(partial); resolve(); return; }
+                        if (attemptsLeft > 0) {
+                            setTimeout(() => tryClick(attemptsLeft - 1), 80);
+                        } else {
+                            // フォールバック: input value を直接書き換えてイベント発火
+                            const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+                            nativeSetter.call(inp, value);
+                            inp.dispatchEvent(new Event('input',  { bubbles: true }));
+                            inp.dispatchEvent(new Event('change', { bubbles: true }));
+                            inp.blur();
+                            console.warn(`[grimoire Bridge] dropdown option not found: "${value}" in #${id}`);
+                            resolve();
+                        }
+                    };
+                    setTimeout(() => tryClick(15), 100);
+                });
             }
         }
+        return Promise.resolve();
     }
 
     /** Gradio のチェックボックスに値をセットする */
@@ -323,8 +328,10 @@
         }).catch(e => { console.warn(`[grimoire Bridge] setOptionViaApi(${key}) failed:`, e); });
     }
 
-    /** gen オブジェクトの各フィールドを WebUI フォームに適用する */
-    function applyGen(root, gen) {
+    /** gen オブジェクトの各フィールドを WebUI フォームに適用する。
+     *  ドロップダウン操作を直列で await するため Promise を返す。
+     */
+    async function applyGen(root, gen) {
         if (!gen) return;
         setNum(root, 'txt2img_steps',             gen.steps);
         setNum(root, 'txt2img_cfg_scale',          gen.cfg);
@@ -336,9 +343,10 @@
         setNum(root, 'txt2img_hires_steps',        gen.hiresSteps);
         setNum(root, 'txt2img_denoising_strength', gen.hiresDenoising);
         setNum(root, 'txt2img_hr_scale',           gen.hiresUpscaleBy);
-        setDropdown(root, gen.sampler,       'txt2img_sampling', 'txt2img_sampler_name', 'txt2img_sampler');
-        setDropdown(root, gen.schedule,      'txt2img_scheduler', 'txt2img_scheduler_type');
-        setDropdown(root, gen.hiresUpscaler, 'txt2img_hr_upscaler', 'txt2img_hr_upscaler_name');
+        // ドロップダウンは並列ではなく直列で実行する（focus 競合を防ぐため）
+        await setDropdown(root, gen.sampler,       'txt2img_sampling', 'txt2img_sampler_name', 'txt2img_sampler');
+        await setDropdown(root, gen.schedule,      'txt2img_scheduler', 'txt2img_scheduler_type');
+        await setDropdown(root, gen.hiresUpscaler, 'txt2img_hr_upscaler', 'txt2img_hr_upscaler_name');
         setCheckbox(root, gen.hiresFix,      'txt2img_enable_hr', 'txt2img_hr_enable');
         // checkpoint / vae は Gradio 4 DOM では変更不可のため API 経由で変更
         // checkpoint はサブフォルダ付きのフルタイトルを解決してから POST
@@ -351,7 +359,7 @@
 
     // ── プロンプト適用 ────────────────────────────────────────────────────────
 
-    function applyPrompt(data) {
+    async function applyPrompt(data) {
         const root  = gradioApp();
         const posEl = getPositiveTextarea(root);
         const negEl = getNegativeTextarea(root);
@@ -374,27 +382,25 @@
             setTextarea(negEl, data.negative || '');
         }
 
-        // gen 設定を WebUI フォームに適用
-        if (data.gen) applyGen(root, data.gen);
+        // gen 設定を WebUI フォームに適用（ドロップダウン操作完了まで待つ）
+        if (data.gen) await applyGen(root, data.gen);
 
         if (data.trigger !== false) {
-            setTimeout(() => {
-                const root2 = gradioApp();
-                const btn = getGenerateBtn(root2);
-                if (!btn) {
-                    console.warn('[PB Bridge] Generate ボタンが見つかりません。');
-                    return;
-                }
-                // 生成中（Interrupt ボタン表示中 かつ Generate ボタン非表示）のときのみスキップ
-                const interrupt = getInterruptBtn(root2);
-                const interruptVisible = interrupt && interrupt.offsetParent !== null && getComputedStyle(interrupt).display !== 'none';
-                const generateHidden  = btn.offsetParent === null || getComputedStyle(btn).display === 'none' || btn.disabled;
-                if (interruptVisible && generateHidden) {
-                    console.warn('[PB Bridge] WebUI は生成中のため Generate をスキップしました。');
-                    return;
-                }
-                btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-            }, 400);
+            const root2 = gradioApp();
+            const btn = getGenerateBtn(root2);
+            if (!btn) {
+                console.warn('[PB Bridge] Generate ボタンが見つかりません。');
+                return;
+            }
+            // 生成中（Interrupt ボタン表示中 かつ Generate ボタン非表示）のときのみスキップ
+            const interrupt = getInterruptBtn(root2);
+            const interruptVisible = interrupt && interrupt.offsetParent !== null && getComputedStyle(interrupt).display !== 'none';
+            const generateHidden  = btn.offsetParent === null || getComputedStyle(btn).display === 'none' || btn.disabled;
+            if (interruptVisible && generateHidden) {
+                console.warn('[PB Bridge] WebUI は生成中のため Generate をスキップしました。');
+                return;
+            }
+            btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
         }
     }
 

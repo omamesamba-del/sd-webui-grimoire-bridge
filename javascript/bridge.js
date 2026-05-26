@@ -404,24 +404,30 @@
 
         let usedTrigger = false;
 
-        // sampler: Python トリガーで更新。なければ DOM フォールバック
+        // sampler: 現在値と異なる場合のみ更新
         if (gen.sampler != null) {
-            if (setGradioTrigger(root, gen.sampler,
-                    'grimoire_txt2img_sampler_trigger', 'grimoire_img2img_sampler_trigger')) {
-                usedTrigger = true;
-            } else {
-                await setDropdown(root, gen.sampler,
-                    'txt2img_sampling', 'txt2img_sampler_name', 'txt2img_sampler');
+            const curSampler = readDropdown(root, 'txt2img_sampling', 'txt2img_sampler_name', 'txt2img_sampler');
+            if (curSampler !== gen.sampler) {
+                if (setGradioTrigger(root, gen.sampler,
+                        'grimoire_txt2img_sampler_trigger', 'grimoire_img2img_sampler_trigger')) {
+                    usedTrigger = true;
+                } else {
+                    await setDropdown(root, gen.sampler,
+                        'txt2img_sampling', 'txt2img_sampler_name', 'txt2img_sampler');
+                }
             }
         }
-        // schedule: 同上
+        // schedule: 現在値と異なる場合のみ更新
         if (gen.schedule != null) {
-            if (setGradioTrigger(root, gen.schedule,
-                    'grimoire_txt2img_scheduler_trigger', 'grimoire_img2img_scheduler_trigger')) {
-                usedTrigger = true;
-            } else {
-                await setDropdown(root, gen.schedule,
-                    'txt2img_scheduler', 'txt2img_scheduler_type');
+            const curSchedule = readDropdown(root, 'txt2img_scheduler', 'txt2img_scheduler_type');
+            if (curSchedule !== gen.schedule) {
+                if (setGradioTrigger(root, gen.schedule,
+                        'grimoire_txt2img_scheduler_trigger', 'grimoire_img2img_scheduler_trigger')) {
+                    usedTrigger = true;
+                } else {
+                    await setDropdown(root, gen.schedule,
+                        'txt2img_scheduler', 'txt2img_scheduler_type');
+                }
             }
         }
         // Python トリガーを使った場合は Gradio の非同期処理を待つ

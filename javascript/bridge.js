@@ -9,7 +9,7 @@
 
     const POLL_INTERVAL_MS = 500;
     const STARTUP_DELAY_MS = 1500;
-    const VERSION = '1.3.6';
+    const VERSION = '1.3.7';
 
     // ── DOM ヘルパー ──────────────────────────────────────────────────────────
 
@@ -158,43 +158,50 @@
             // パターン②: Gradio 4 カスタムドロップダウン (input[type="text"])
             const inp = el.querySelector('input[type="text"]');
             if (inp) {
-                // フォーカス＆クリックでドロップダウンを開く
+                // ドロップダウンを開く: 親コンテナと input の両方に mousedown+click を送る
+                const container = inp.closest('.wrap, .wrap-inner, [data-testid]') || inp.parentElement;
+                if (container && container !== inp) {
+                    container.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                }
                 inp.focus();
+                inp.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
                 inp.click();
-                // オプションリストが表示されるまで待ってからクリック選択
-                const tryClick = (attemptsLeft) => {
+
+                const findItems = () => {
                     // Gradio バージョン / フォークによってリスト構造が異なるため複数セレクタを試す
                     const OPTION_SELECTORS = [
-                        'ul.options li',
-                        '.options li',
-                        'li.item',
-                        '[role="option"]',
-                        'li[role="option"]',
-                        'ul[role="listbox"] li',
-                        '[role="listbox"] [role="option"]',
-                        'div.options > div',
-                        '.dropdown-wrapper li',
-                        'ul li',  // 最終フォールバック（要素内のみ）
+                        'ul.options li', '.options li', 'li.item',
+                        '[role="option"]', 'li[role="option"]',
+                        'ul[role="listbox"] li', '[role="listbox"] [role="option"]',
+                        'div.options > div', '.dropdown-wrapper li',
+                        'ul li',
                     ];
-                    let items = [];
-                    // まずコンテナ内を探す
                     for (const sel of OPTION_SELECTORS) {
                         const found = Array.from(el.querySelectorAll(sel));
-                        if (found.length > 0) { items = found; break; }
+                        if (found.length > 0) return found;
                     }
-                    // なければ document 全体を探す（portal 対応）—"ul li" は除く
-                    if (items.length === 0) {
-                        for (const sel of OPTION_SELECTORS.slice(0, -1)) {
-                            const found = Array.from(document.querySelectorAll(sel));
-                            if (found.length > 0) { items = found; break; }
-                        }
+                    for (const sel of OPTION_SELECTORS.slice(0, -1)) {
+                        const found = Array.from(document.querySelectorAll(sel));
+                        if (found.length > 0) return found;
                     }
-                    const exact = items.find(it => it.textContent.trim() === value);
-                    if (exact) { exact.click(); return; }
+                    return [];
+                };
+
+                const selectItem = (item) => {
+                    // mousedown を先に送ることで input の blur によるドロップダウン消失を防ぐ
+                    item.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                    item.dispatchEvent(new MouseEvent('mouseup',   { bubbles: true, cancelable: true }));
+                    item.click();
+                };
+
+                const tryClick = (attemptsLeft) => {
+                    const items = findItems();
+                    const exact   = items.find(it => it.textContent.trim() === value);
+                    if (exact)   { selectItem(exact);   return; }
                     const partial = items.find(it => it.textContent.trim().includes(value) || value.includes(it.textContent.trim()));
-                    if (partial) { partial.click(); return; }
+                    if (partial) { selectItem(partial); return; }
                     if (attemptsLeft > 0) {
-                        setTimeout(() => tryClick(attemptsLeft - 1), 60);
+                        setTimeout(() => tryClick(attemptsLeft - 1), 80);
                     } else {
                         // フォールバック: input value を直接書き換えてイベント発火
                         const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
@@ -205,7 +212,7 @@
                         console.warn(`[grimoire Bridge] dropdown option not found: "${value}" in #${id}`);
                     }
                 };
-                setTimeout(() => tryClick(10), 60);
+                setTimeout(() => tryClick(15), 100);
                 return;
             }
         }

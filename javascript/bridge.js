@@ -9,7 +9,7 @@
 
     const POLL_INTERVAL_MS = 500;
     const STARTUP_DELAY_MS = 1500;
-    const VERSION = '1.3.9';
+    const VERSION = '1.4.0';
 
     // ── DOM ヘルパー ──────────────────────────────────────────────────────────
 
@@ -364,8 +364,30 @@
         }).catch(e => { console.warn(`[grimoire Bridge] setOptionViaApi(${key}) failed:`, e); });
     }
 
+    /** Python 側に仕込んだ隠し Textbox トリガーを使って Gradio のコンポーネントを更新する。
+     *  main.py の GrimoireBridgeScript が input イベントを受け取り、
+     *  Python 関数の戻り値として sampler/scheduler を更新する。
+     *  トリガー要素が見つかれば true を返す。
+     */
+    function setGradioTrigger(root, value, ...triggerIds) {
+        for (const id of triggerIds) {
+            const el = root.querySelector(`#${id}`);
+            if (!el) continue;
+            const inp = el.querySelector('input[type="text"], textarea');
+            if (!inp) continue;
+            const proto = inp.tagName === 'TEXTAREA'
+                ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+            Object.getOwnPropertyDescriptor(proto, 'value').set.call(inp, value);
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            console.log(`[grimoire Bridge] gradio trigger #${id} = "${value}"`);
+            return true;
+        }
+        return false;
+    }
+
     /** gen オブジェクトの各フィールドを WebUI フォームに適用する。
-     *  ドロップダウン操作を直列で await するため Promise を返す。
+     *  sampler/scheduler は Python トリガー経由（Gradio の仕組みで更新）、
+     *  それ以外は DOM 操作で更新する。
      */
     async function applyGen(root, gen) {
         if (!gen) return;
@@ -379,13 +401,37 @@
         setNum(root, 'txt2img_hires_steps',        gen.hiresSteps);
         setNum(root, 'txt2img_denoising_strength', gen.hiresDenoising);
         setNum(root, 'txt2img_hr_scale',           gen.hiresUpscaleBy);
-        // ドロップダウンは並列ではなく直列で実行する（focus 競合を防ぐため）
-        await setDropdown(root, gen.sampler,       'txt2img_sampling', 'txt2img_sampler_name', 'txt2img_sampler');
-        await setDropdown(root, gen.schedule,      'txt2img_scheduler', 'txt2img_scheduler_type');
+
+        let usedTrigger = false;
+
+        // sampler: Python トリガーで更新。なければ DOM フォールバック
+        if (gen.sampler != null) {
+            if (setGradioTrigger(root, gen.sampler,
+                    'grimoire_txt2img_sampler_trigger', 'grimoire_img2img_sampler_trigger')) {
+                usedTrigger = true;
+            } else {
+                await setDropdown(root, gen.sampler,
+                    'txt2img_sampling', 'txt2img_sampler_name', 'txt2img_sampler');
+            }
+        }
+        // schedule: 同上
+        if (gen.schedule != null) {
+            if (setGradioTrigger(root, gen.schedule,
+                    'grimoire_txt2img_scheduler_trigger', 'grimoire_img2img_scheduler_trigger')) {
+                usedTrigger = true;
+            } else {
+                await setDropdown(root, gen.schedule,
+                    'txt2img_scheduler', 'txt2img_scheduler_type');
+            }
+        }
+        // Python トリガーを使った場合は Gradio の非同期処理を待つ
+        if (usedTrigger) {
+            await new Promise(r => setTimeout(r, 1000));
+        }
+
         await setDropdown(root, gen.hiresUpscaler, 'txt2img_hr_upscaler', 'txt2img_hr_upscaler_name');
         setCheckbox(root, gen.hiresFix,      'txt2img_enable_hr', 'txt2img_hr_enable');
         // checkpoint / vae は Gradio 4 DOM では変更不可のため API 経由で変更
-        // checkpoint はサブフォルダ付きのフルタイトルを解決してから POST
         if (gen.checkpoint) setCheckpointViaApi(gen.checkpoint, 'setting_sd_model_checkpoint');
         setOptionViaApi('sd_vae', gen.vae, 'setting_sd_vae');
         if (gen.clipSkip != null && !isNaN(gen.clipSkip)) {

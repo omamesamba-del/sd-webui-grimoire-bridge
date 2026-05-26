@@ -15,7 +15,7 @@ try:
 except Exception:
     _HAS_SCRIPTS = False
 
-_BRIDGE_VERSION = "1.3.5"
+_BRIDGE_VERSION = "1.4.0"
 _pending: queue.Queue = queue.Queue()
 _last_state: dict = {}          # bridge.js から push される最新の WebUI 状態
 _state_requested: bool = False  # grimoire からのオンデマンド取得フラグ
@@ -143,14 +143,54 @@ script_callbacks.on_app_started(on_app_started)
 
 
 # scripts/ フォルダに置く場合は Script サブクラスが必要。
-# show() が False を返すことで生成パイプラインには一切関与しない。
+# AlwaysVisible にすることで after_component() が呼ばれ、sampler/scheduler
+# コンポーネントを Python 経由で更新するためのトリガー Textbox を仕込む。
 if _HAS_SCRIPTS:
     class GrimoireBridgeScript(scripts.Script):
+        def __init__(self):
+            self._sampler  = {}   # prefix -> gr.Radio / gr.Dropdown
+            self._scheduler = {}  # prefix -> gr.Dropdown
+
         def title(self):
             return "grimoire Bridge"
 
         def show(self, is_img2img):
-            return False  # UI非表示・生成処理に関与しない
+            return scripts.AlwaysVisible
 
         def ui(self, is_img2img):
             return []
+
+        def after_component(self, component, **kwargs):
+            eid = getattr(component, 'elem_id', '')
+            for prefix in ('txt2img', 'img2img'):
+                if eid == f'{prefix}_sampling':
+                    self._sampler[prefix] = component
+                elif eid == f'{prefix}_scheduler':
+                    self._scheduler[prefix] = component
+
+            if eid == 'txt2img_generation_info_button':
+                self._create_triggers('txt2img')
+            elif eid == 'img2img_generation_info_button':
+                self._create_triggers('img2img')
+
+        def _create_triggers(self, prefix):
+            sampler_comp   = self._sampler.get(prefix)
+            scheduler_comp = self._scheduler.get(prefix)
+
+            fn = lambda v: gr.update(value=v) if v else gr.update()
+
+            with gr.Row(visible=False):
+                t_s = gr.Textbox(value='', label='',
+                                 elem_id=f'grimoire_{prefix}_sampler_trigger',
+                                 interactive=True)
+                t_c = gr.Textbox(value='', label='',
+                                 elem_id=f'grimoire_{prefix}_scheduler_trigger',
+                                 interactive=True)
+
+            if sampler_comp is not None:
+                t_s.input(fn=fn, inputs=[t_s], outputs=[sampler_comp], show_progress=False)
+            if scheduler_comp is not None:
+                t_c.input(fn=fn, inputs=[t_c], outputs=[scheduler_comp], show_progress=False)
+
+        def run(self, p, *args):
+            pass

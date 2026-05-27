@@ -15,7 +15,7 @@ try:
 except Exception:
     _HAS_SCRIPTS = False
 
-_BRIDGE_VERSION = "1.4.0"
+_BRIDGE_VERSION = "1.4.2"
 _pending: queue.Queue = queue.Queue()
 _last_state: dict = {}          # bridge.js から push される最新の WebUI 状態
 _state_requested: bool = False  # grimoire からのオンデマンド取得フラグ

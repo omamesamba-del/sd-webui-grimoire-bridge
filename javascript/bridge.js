@@ -9,7 +9,7 @@
 
     const POLL_INTERVAL_MS = 500;
     const STARTUP_DELAY_MS = 1500;
-    const VERSION = '1.4.0';
+    const VERSION = '1.4.2';
 
     // ── DOM ヘルパー ──────────────────────────────────────────────────────────
 
@@ -107,8 +107,18 @@
             if (sel && sel.value) return sel.value;
             // パターン②: Gradio 4 カスタムドロップダウン (input[type="text"])
             const inp = el.querySelector('input[type="text"]');
-            if (inp && inp.value) return inp.value;
-            // パターン③: ボタン式 (selected / aria-selected)
+            if (inp && inp.value.trim()) return inp.value.trim();
+            // パターン③: gr.Radio (input[type="radio"]:checked) — reForge の sampler 等
+            const checked = el.querySelector('input[type="radio"]:checked');
+            if (checked) {
+                const lbl = checked.closest('label');
+                if (lbl) {
+                    const span = lbl.querySelector('span');
+                    return (span ? span.textContent : lbl.textContent).trim();
+                }
+                if (checked.value) return checked.value;
+            }
+            // パターン④: ボタン式 (selected / aria-selected)
             const btn = el.querySelector('button.selected, [aria-selected="true"]');
             if (btn && btn.textContent.trim()) return btn.textContent.trim();
         }

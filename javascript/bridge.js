@@ -105,10 +105,10 @@
             // パターン①: native select
             const sel = el.querySelector('select');
             if (sel && sel.value) return sel.value;
-            // パターン②: Gradio 4 カスタムドロップダウン (input[type="text"])
-            const inp = el.querySelector('input[type="text"]');
+            // パターン②: Gradio 4 カスタムドロップダウン (type="text" または type 属性なし)
+            const inp = el.querySelector('input[type="text"], input:not([type])');
             if (inp && inp.value.trim()) return inp.value.trim();
-            // パターン③: gr.Radio (input[type="radio"]:checked) — reForge の sampler 等
+            // パターン③: gr.Radio (input[type="radio"]:checked)
             const checked = el.querySelector('input[type="radio"]:checked');
             if (checked) {
                 const lbl = checked.closest('label');
